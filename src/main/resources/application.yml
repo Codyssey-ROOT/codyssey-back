@@ -1,0 +1,96 @@
+spring:
+  application:
+    name: deepfence
+
+  config:
+    import: optional:file:.env[.properties]
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://localhost:${POSTGRES_PORT}/${POSTGRES_DB}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        show_sql: false
+        format_sql: true
+        use_sql_comments: false
+        highlight_sql: true
+        #        default_batch_fetch_size: 100
+
+  jackson:
+    time-zone: Asia/Seoul
+    serialization:
+      write-dates-as-timestamps: false
+
+  security:
+    oauth2:
+      client:
+        registration:
+          kakao:
+            client-id: ${KAKAO_CLIENT_ID}
+            client-secret: ${KAKAO_CLIENT_SECRET}
+            redirect-uri: "{baseUrl}/login/oauth2/code/kakao"
+            client-authentication-method: client_secret_post
+            authorization-grant-type: authorization_code
+            client-name: Kakao
+            scope:
+              - profile_nickname
+              - profile_image
+              - account_email
+
+        provider:
+            kakao:
+              authorization-uri: https://kauth.kakao.com/oauth/authorize
+              token-uri: https://kauth.kakao.com/oauth/token
+              user-info-uri: https://kapi.kakao.com/v2/user/me
+              user-name-attribute: id
+
+
+jwt:
+  key: ${JWT_SECRET}
+  access-token-name: ACCESS_TOKEN
+  access-token-ttl: ${JWT_ACCESS_TOKEN_EXPIRE}
+  refresh-token-name: REFRESH_TOKEN
+  refresh-token-ttl: ${JWT_REFRESH_TOKEN_EXPIRE}
+
+app:
+  aws:
+    region: ${AWS_REGION}
+    bucket: ${AWS_S3_BUCKET}
+
+  domain: ${DOMAIN}
+
+  base-url: ${APP_BASE_URL}
+
+  cdn:
+    base-url: ${CDN_BASE_URL}
+
+  images:
+    presigned-put-ttl: ${IMAGE_PRESIGNED_PUT_TTL}
+    max-file-size: ${IMAGE_MAX_FILE_SIZE}
+
+  client-base-url: ${CLIENT_BASE_URL}
+
+  firebase:
+    enabled: ${FIREBASE_ENABLED}
+    service-account-base64: ${FIREBASE_SERVICE_ACCOUNT_BASE64}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+    org.hibernate.orm.jdbc.bind: trace
+    org.hibernate.orm.jdbc.extract: trace
