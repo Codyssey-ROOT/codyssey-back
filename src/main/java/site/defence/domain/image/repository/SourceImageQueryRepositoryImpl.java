@@ -119,6 +119,22 @@ public class SourceImageQueryRepositoryImpl
                 .fetch();
     }
 
+    @Override
+    public Optional<SourceImage> findOwnedByObjectKey(
+            String objectKey,
+            Long userId
+    ) {
+        return Optional.ofNullable(
+                queryFactory
+                        .selectFrom(sourceImage)
+                        .where(
+                                sourceImage.objectKey.eq(objectKey),
+                                sourceImage.user.id.eq(userId)
+                        )
+                        .fetchOne()
+        );
+    }
+
     private BooleanExpression cursorLt(Long cursor) {
         return cursor == null
                 ? null

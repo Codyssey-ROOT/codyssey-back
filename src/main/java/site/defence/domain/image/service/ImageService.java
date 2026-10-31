@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import site.defence.domain.image.dto.request.ImageUploadCompleteRequest;
 import site.defence.domain.image.dto.request.ImageUploadRequest;
 import site.defence.domain.image.dto.response.*;
 import site.defence.domain.image.entity.*;
@@ -129,17 +130,23 @@ public class ImageService {
         );
     }
 
-    // S3 업로드 완료 검증
     @Transactional
     public void completeUpload(
             Long userId,
-            Long imageId
+            ImageUploadCompleteRequest request
     ) {
         findActiveUser(userId);
 
-        SourceImage image =
-                findUserImage(userId, imageId);
+        SourceImage image = sourceImageRepository
+                .findOwnedByObjectKey(
+                        request.objectKey(),
+                        userId
+                )
+                .orElseThrow(() -> new GlobalException(
+                        ImageErrorCode.IMAGE_NOT_FOUND
+                ));
 
+        // 이미 업로드가 완료된 경우 중복 요청 허용
         if (image.getStatus() == ImageStatus.UPLOADED
                 || image.getStatus() == ImageStatus.PROCEED
                 || image.getStatus() == ImageStatus.COMPLETED) {
@@ -152,6 +159,7 @@ public class ImageService {
             );
         }
 
+        // S3에 실제로 업로드되었는지 확인
         HeadObjectResponse metadata =
                 s3StorageService.getObjectMetadata(
                         image.getObjectKey()
@@ -162,10 +170,12 @@ public class ImageService {
                 metadata.contentLength()
         );
 
-        boolean sameType = image.getContentType()
-                .equalsIgnoreCase(metadata.contentType());
+        boolean sameContentType =
+                image.getContentType().equalsIgnoreCase(
+                        metadata.contentType()
+                );
 
-        if (!sameSize || !sameType) {
+        if (!sameSize || !sameContentType) {
             throw new GlobalException(
                     ImageErrorCode.IMAGE_UPLOAD_MISMATCH
             );

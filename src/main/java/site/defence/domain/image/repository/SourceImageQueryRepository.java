@@ -32,4 +32,9 @@ public interface SourceImageQueryRepository {
             RiskLevel riskLevel,
             Collection<ImageStatus> statuses
     );
+
+    Optional<SourceImage> findOwnedByObjectKey(
+            String objectKey,
+            Long userId
+    );
 }
