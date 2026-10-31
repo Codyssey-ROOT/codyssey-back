@@ -1,0 +1,65 @@
+
+services:
+  app:
+    image: ${DOCKERHUB_USERNAME:?required}/deepfence:${IMAGE_TAG:?required}
+    container_name: deepfence-app
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./runtime/application.yml:/app/config/application.yml:ro
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - deepfence-network
+
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg15
+    container_name: deepfence-postgres
+    restart: unless-stopped
+
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: Asia/Seoul
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+    networks:
+      - deepfence-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: deepfence-redis
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+    networks:
+      - deepfence-network
+
+networks:
+  deepfence-network:
+    driver: bridge
