@@ -1,15 +1,15 @@
-
 package site.defence.domain.image.service;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.*;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import site.defence.domain.image.dto.request.ImageUploadCompleteRequest;
 import site.defence.domain.image.dto.request.ImageUploadRequest;
 import site.defence.domain.image.dto.response.*;
 import site.defence.domain.image.entity.*;
+import site.defence.domain.image.event.ImageUploadedEvent;
 import site.defence.domain.image.exception.ImageErrorCode;
 import site.defence.domain.image.repository.*;
 import site.defence.domain.user.entity.User;
@@ -55,6 +55,7 @@ public class ImageService {
 
     private final S3StorageService s3StorageService;
     private final CloudFrontUrlService cloudFrontUrlService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${app.images.max-file-size:10485760}")
     private long maxFileSize;
@@ -62,7 +63,6 @@ public class ImageService {
     @Value("${app.images.presigned-put-ttl:300}")
     private long putTtlSeconds;
 
-    // S3 Presigned PUT URL 발급
     @Transactional
     public ImageUploadResponse createUploadUrl(
             Long userId,
@@ -137,8 +137,9 @@ public class ImageService {
     ) {
         findActiveUser(userId);
 
+        // 사용자 소유권 검증과 비관적 락을 한 번에 수행
         SourceImage image = sourceImageRepository
-                .findOwnedByObjectKey(
+                .findOwnedByObjectKeyForUpdate(
                         request.objectKey(),
                         userId
                 )
@@ -146,7 +147,7 @@ public class ImageService {
                         ImageErrorCode.IMAGE_NOT_FOUND
                 ));
 
-        // 이미 업로드가 완료된 경우 중복 요청 허용
+        // 이미 업로드 완료된 요청은 중복 처리하지 않음
         if (image.getStatus() == ImageStatus.UPLOADED
                 || image.getStatus() == ImageStatus.PROCEED
                 || image.getStatus() == ImageStatus.COMPLETED) {
@@ -159,7 +160,6 @@ public class ImageService {
             );
         }
 
-        // S3에 실제로 업로드되었는지 확인
         HeadObjectResponse metadata =
                 s3StorageService.getObjectMetadata(
                         image.getObjectKey()
@@ -171,7 +171,8 @@ public class ImageService {
         );
 
         boolean sameContentType =
-                image.getContentType().equalsIgnoreCase(
+                metadata.contentType() != null
+                        && image.getContentType().equalsIgnoreCase(
                         metadata.contentType()
                 );
 
@@ -181,10 +182,18 @@ public class ImageService {
             );
         }
 
+        // UPLOADING → UPLOADED
         image.markUploaded();
+
+        // 트랜잭션 커밋 후 FastAPI 호출을 시작하기 위한 이벤트
+        eventPublisher.publishEvent(
+                new ImageUploadedEvent(
+                        image.getId(),
+                        image.getObjectKey()
+                )
+        );
     }
 
-    // 이미지 목록 - 10개 커서 페이지네이션
     public ImageListResponse getImages(
             Long userId,
             Long cursor
@@ -221,7 +230,6 @@ public class ImageService {
         );
     }
 
-    // 모델링 진행 중 / 취약 이미지 목록
     public ImageStatusResponse getImageStatus(
             Long userId
     ) {
@@ -250,15 +258,16 @@ public class ImageService {
         );
     }
 
-    // 원본 / 블러 / FaceShield 상세 조회
     public ImageDetailResponse getImage(
             Long userId,
             Long imageId
     ) {
         findActiveUser(userId);
 
-        SourceImage source =
-                findUserImage(userId, imageId);
+        SourceImage source = findUserImage(
+                userId,
+                imageId
+        );
 
         if (!VISIBLE_STATUSES.contains(source.getStatus())) {
             throw new GlobalException(
