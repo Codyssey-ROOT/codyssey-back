@@ -1,4 +1,3 @@
-
 package site.defence.domain.user.entity;
 
 import jakarta.persistence.*;
@@ -13,7 +12,13 @@ import static lombok.AccessLevel.*;
 
 @Getter
 @Entity
-@Table(name = "user_device")
+@Table(
+        name = "user_device",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_user_device_fcm_token",
+                columnNames = "fcm_token"
+        )
+)
 @NoArgsConstructor(access = PROTECTED)
 public class UserDevice extends BaseTimeEntity {
 
@@ -50,6 +55,14 @@ public class UserDevice extends BaseTimeEntity {
                 .user(user)
                 .fcmToken(fcmToken)
                 .build();
+    }
+
+    public void changeUser(User user) {
+        if (user == null) {
+            throw new IllegalArgumentException("사용자는 필수입니다.");
+        }
+
+        this.user = user;
     }
 
     public void updateFcmToken(String fcmToken) {
