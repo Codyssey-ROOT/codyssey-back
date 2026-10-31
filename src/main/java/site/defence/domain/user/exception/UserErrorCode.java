@@ -13,6 +13,12 @@ public enum UserErrorCode implements ErrorCode {
             HttpStatus.NOT_FOUND,
             2000,
             "사용자를 찾을 수 없습니다."
+    ),
+
+    FCM_TOKEN_CONFLICT(
+            HttpStatus.CONFLICT,
+            2001,
+            "FCM 토큰 등록이 충돌했습니다. 다시 시도해주세요."
     );
 
     private final HttpStatus status;

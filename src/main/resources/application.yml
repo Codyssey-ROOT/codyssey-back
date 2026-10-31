@@ -2,6 +2,11 @@ spring:
   application:
     name: deepfence
 
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+
   config:
     import: optional:file:.env[.properties]
 
@@ -71,7 +76,7 @@ oauth2:
 
 app:
   aws:
-    region: ${AWS_REGION}
+    region: ${AWS_REGION:ap-northeast-2}
     bucket: ${AWS_S3_BUCKET}
 
   domain: ${DOMAIN}
@@ -82,8 +87,8 @@ app:
     base-url: ${CDN_BASE_URL}
 
   images:
-    presigned-put-ttl: ${IMAGE_PRESIGNED_PUT_TTL}
-    max-file-size: ${IMAGE_MAX_FILE_SIZE}
+    presigned-put-ttl: ${IMAGE_PRESIGNED_PUT_TTL:300}
+    max-file-size: ${IMAGE_MAX_FILE_SIZE:10485760}
 
   client-base-url: ${CLIENT_BASE_URL}
 
