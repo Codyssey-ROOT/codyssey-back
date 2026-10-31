@@ -3,6 +3,7 @@ package site.defence.domain.image.repository;
 import com.querydsl.core.types.dsl.BooleanExpression;
 import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
 import site.defence.domain.image.entity.ImageStatus;
@@ -131,6 +132,38 @@ public class SourceImageQueryRepositoryImpl
                                 sourceImage.objectKey.eq(objectKey),
                                 sourceImage.user.id.eq(userId)
                         )
+                        .fetchOne()
+        );
+    }
+
+    @Override
+    public Optional<SourceImage> findOwnedByObjectKeyForUpdate(
+            String objectKey,
+            Long userId
+    ) {
+        return Optional.ofNullable(
+                queryFactory
+                        .selectFrom(sourceImage)
+                        .where(
+                                sourceImage.objectKey.eq(objectKey),
+                                sourceImage.user.id.eq(userId)
+                        )
+                        .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                        .fetchOne()
+        );
+    }
+
+    @Override
+    public Optional<SourceImage> findByIdForUpdate(
+            Long imageId
+    ) {
+        return Optional.ofNullable(
+                queryFactory
+                        .selectFrom(sourceImage)
+                        .where(
+                                sourceImage.id.eq(imageId)
+                        )
+                        .setLockMode(LockModeType.PESSIMISTIC_WRITE)
                         .fetchOne()
         );
     }
