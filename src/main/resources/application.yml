@@ -90,6 +90,13 @@ app:
     presigned-put-ttl: ${IMAGE_PRESIGNED_PUT_TTL:300}
     max-file-size: ${IMAGE_MAX_FILE_SIZE:10485760}
 
+    # FastAPI 연결 설정
+  blur:
+    base-url: ${BLUR_BASE_URL:https://ai.deepfence.site}
+    api-key: ${BLUR_API_KEY}
+    internal-api-key: ${INTERNAL_API_KEY}
+
+
   client-base-url: ${CLIENT_BASE_URL}
 
   firebase:
