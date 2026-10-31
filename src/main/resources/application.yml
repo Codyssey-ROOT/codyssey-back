@@ -63,6 +63,12 @@ jwt:
   refresh-token-name: REFRESH_TOKEN
   refresh-token-ttl: ${JWT_REFRESH_TOKEN_EXPIRE}
 
+cookie:
+  domain: localhost
+
+oauth2:
+  success-redirect-url: ${OAUTH2_SUCCESS_REDIRECT_URL:http://localhost:8080}
+
 app:
   aws:
     region: ${AWS_REGION}
