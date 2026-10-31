@@ -37,4 +37,15 @@ public interface SourceImageQueryRepository {
             String objectKey,
             Long userId
     );
+
+    // 원본 업로드 완료 시 사용자 소유권 검증 및 락
+    Optional<SourceImage> findOwnedByObjectKeyForUpdate(
+            String objectKey,
+            Long userId
+    );
+
+    // FastAPI 처리 시작 및 완료 시 락
+    Optional<SourceImage> findByIdForUpdate(
+            Long imageId
+    );
 }
