@@ -1,6 +1,7 @@
 package site.defence.global.config;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -11,6 +12,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import site.defence.global.security.cookie.CookieProvider;
+import site.defence.global.security.filter.InternalBlurApiKeyFilter;
 import site.defence.global.security.filter.JwtAuthenticationFilter;
 import site.defence.global.security.handler.CustomAccessDeniedHandler;
 import site.defence.global.security.handler.CustomAuthenticationEntryPoint;
@@ -31,43 +33,83 @@ public class SecurityConfig {
     private final TokenProvider tokenProvider;
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            @Value("${app.blur.internal-api-key}") String internalApiKey
+    ) throws Exception {
 
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
-                .sessionManagement(sessionManagement -> sessionManagement
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                )
-                .authorizeHttpRequests(authorizeHttpRequests -> authorizeHttpRequests
-                        .requestMatchers(
-                                "/oauth2/**",
-                                "/login/oauth2/**",
-                                "/users/reissue",
-                                "/users/logout",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html",
-                                "/v3/api-docs/**",
-                                "/actuator/health",
-                                "/actuator/prometheus"
-                        ).permitAll()
-                        .anyRequest().authenticated()
-                )
-                .exceptionHandling(exceptionHandling -> exceptionHandling
-                        .authenticationEntryPoint(customAuthenticationEntryPoint)
-                        .accessDeniedHandler(customAccessDeniedHandler)
-                )
-                .oauth2Login(oauth2Login -> oauth2Login
-                        .userInfoEndpoint(userInfoEndpoint -> userInfoEndpoint
-                                .userService(customOAuth2UserService)
+
+                .sessionManagement(sessionManagement ->
+                        sessionManagement.sessionCreationPolicy(
+                                SessionCreationPolicy.STATELESS
                         )
-                        .successHandler(customOAuth2SuccessHandler)
                 )
+
+                .authorizeHttpRequests(authorizeHttpRequests ->
+                        authorizeHttpRequests
+                                .requestMatchers(
+                                        "/oauth2/**",
+                                        "/login/oauth2/**",
+                                        "/users/reissue",
+                                        "/users/logout",
+                                        "/swagger-ui/**",
+                                        "/swagger-ui.html",
+                                        "/v3/api-docs/**",
+                                        "/actuator/health",
+                                        "/actuator/prometheus",
+
+                                        // FastAPI 내부 전용 API
+                                        "/blur/images/presigned-url",
+                                        "/blur/images/complete"
+                                )
+                                .permitAll()
+
+                                .anyRequest()
+                                .authenticated()
+                )
+
+                .exceptionHandling(exceptionHandling ->
+                        exceptionHandling
+                                .authenticationEntryPoint(
+                                        customAuthenticationEntryPoint
+                                )
+                                .accessDeniedHandler(
+                                        customAccessDeniedHandler
+                                )
+                )
+
+                .oauth2Login(oauth2Login ->
+                        oauth2Login
+                                .userInfoEndpoint(userInfoEndpoint ->
+                                        userInfoEndpoint.userService(
+                                                customOAuth2UserService
+                                        )
+                                )
+                                .successHandler(
+                                        customOAuth2SuccessHandler
+                                )
+                )
+
                 .addFilterBefore(
-                        new JwtAuthenticationFilter(cookieProvider, tokenProvider),
-                        UsernamePasswordAuthenticationFilter.class)
+                        new JwtAuthenticationFilter(
+                                cookieProvider,
+                                tokenProvider
+                        ),
+                        UsernamePasswordAuthenticationFilter.class
+                )
+
+                .addFilterBefore(
+                        new InternalBlurApiKeyFilter(
+                                internalApiKey
+                        ),
+                        JwtAuthenticationFilter.class
+                )
+
                 .build();
     }
 }
