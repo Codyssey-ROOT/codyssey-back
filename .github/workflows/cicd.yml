@@ -1,0 +1,135 @@
+
+name: DeepFence CI/CD
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'chore/**'
+
+  pull_request:
+    branches:
+      - develop
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ==============================
+  # CI: Docker Build & Push
+  # ==============================
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/deepfence:latest
+            ${{ vars.DOCKERHUB_USERNAME }}/deepfence:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==============================
+  # CD: Deploy to EC2
+  # ==============================
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-push
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+    environment: production
+
+    concurrency:
+      group: deepfence-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # 운영 Compose 파일 서버 전송
+      - name: Copy Docker Compose
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_HOST_FINGERPRINT }}
+          source: docker-compose.prod.yml
+          target: /opt/deepfence
+          overwrite: true
+
+      # Docker Hub 이미지 Pull 및 배포
+      - name: Deploy Application
+        uses: appleboy/ssh-action@v1
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_HOST_FINGERPRINT }}
+          envs: IMAGE_TAG
+          command_timeout: 10m
+
+          script: |
+            set -eu
+
+            cd /opt/deepfence
+
+            # 배포 버전 저장
+            printf 'IMAGE_TAG=%s\n' "$IMAGE_TAG" > .deploy.env
+            chmod 600 .deploy.env
+
+            # Compose 설정 검증
+            docker compose \
+              --env-file .env \
+              --env-file .deploy.env \
+              -f docker-compose.prod.yml \
+              config -q
+
+            # 새 이미지 다운로드
+            docker compose \
+              --env-file .env \
+              --env-file .deploy.env \
+              -f docker-compose.prod.yml \
+              pull app
+
+            # 컨테이너 실행 및 갱신
+            docker compose \
+              --env-file .env \
+              --env-file .deploy.env \
+              -f docker-compose.prod.yml \
+              up -d
+
+            # 실행 상태 확인
+            docker compose \
+              --env-file .env \
+              --env-file .deploy.env \
+              -f docker-compose.prod.yml \
+              ps
