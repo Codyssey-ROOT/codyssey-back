@@ -2,7 +2,9 @@ package site.defence.domain.image.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +24,7 @@ import site.defence.domain.image.entity.ImageStatus;
 import site.defence.domain.image.entity.SecondProcessedImage;
 import site.defence.domain.image.entity.SourceImage;
 
+import site.defence.domain.image.event.FaceShieldCompletedEvent;
 import site.defence.domain.image.exception.ImageErrorCode;
 
 import site.defence.domain.image.repository.AiModelRepository;
@@ -29,6 +32,10 @@ import site.defence.domain.image.repository.FaceShieldJobRepository;
 import site.defence.domain.image.repository.FaceShieldUploadTicketRepository;
 import site.defence.domain.image.repository.SecondProcessedImageRepository;
 import site.defence.domain.image.repository.SourceImageRepository;
+
+import site.defence.domain.notification.NotificationType;
+import site.defence.domain.notification.entity.Notification;
+import site.defence.domain.notification.repository.NotificationRepository;
 
 import site.defence.global.exception.GlobalException;
 import site.defence.global.storage.S3StorageService;
@@ -53,6 +60,9 @@ public class FaceShieldService {
     private final AiModelRepository aiModelRepository;
     private final S3StorageService s3StorageService;
 
+    private final NotificationRepository notificationRepository;
+    private final ApplicationEventPublisher eventPublisher;
+
     @Value("${app.faceshield.lease-seconds:1800}")
     private long leaseSeconds;
 
@@ -69,20 +79,20 @@ public class FaceShieldService {
     private long putTtlSeconds;
 
     /**
-     * NCP GPU Worker에 FaceShield 작업을 할당한다.
+     * NCP GPU Worker에 처리할 작업 할당
      */
     @Transactional
     public Optional<FaceShieldClaimResponse> claim() {
 
         Instant now = Instant.now();
 
-        // 1. 재시도 한도를 소진한 만료 작업 정리
+        // 최대 시도 횟수를 소진한 만료 작업 정리
         jobRepository.findExpiredExhausted(
                 maxAttempts,
                 now
         ).ifPresent(this::finishAsFailed);
 
-        // 2. QueryDSL로 할당 가능한 작업 조회
+        // QueryDSL 기반 다음 작업 조회
         Optional<FaceShieldJob> optionalJob =
                 jobRepository.findNextClaimable(
                         maxAttempts,
@@ -101,33 +111,31 @@ public class FaceShieldService {
         SourceImage sourceImage =
                 firstImage.getSourceImage();
 
-        // 3. 원본 이미지 상태 검증
         if (sourceImage.getStatus() != ImageStatus.PROCEED) {
             finishAsFailed(job);
             return Optional.empty();
         }
 
-        // 4. 새로운 Lease Token 발급
-        String leaseToken = UUID.randomUUID().toString();
+        // 새로운 Lease Token 생성
+        String leaseToken =
+                UUID.randomUUID().toString();
 
         Instant expiresAt = now.plus(
                 leaseSeconds,
                 ChronoUnit.SECONDS
         );
 
-        // 5. 작업 상태 변경
         job.claim(
                 leaseToken,
                 expiresAt
         );
 
-        // 6. 블러 이미지 Presigned GET URL 생성
+        // 블러 이미지 다운로드 URL 발급
         String downloadUrl =
                 s3StorageService.createPresignedGetUrl(
                         firstImage.getObjectKey()
                 );
 
-        // 7. 작업 할당 정보 반환
         return Optional.of(
                 new FaceShieldClaimResponse(
                         job.getId(),
@@ -141,24 +149,22 @@ public class FaceShieldService {
     }
 
     /**
-     * FaceShield 보호 이미지 업로드 URL 발급
+     * 보호 이미지 업로드용 Presigned URL 발급
      */
     @Transactional
     public FaceShieldPresignedUrlResponse createPresignedUrl(
             FaceShieldPresignedUrlRequest request
     ) {
 
-        // 1. 작업 조회 및 비관적 락 획득
         FaceShieldJob job =
                 findJobForUpdate(request.jobId());
 
-        // 2. 현재 작업의 유효한 Lease인지 확인
         requireActiveLease(
                 job,
                 request.leaseToken()
         );
 
-        // 3. PNG 형식만 허용
+        // PNG 이미지 형식 검증
         if (!"image/png".equalsIgnoreCase(
                 request.contentType().trim()
         )) {
@@ -167,7 +173,7 @@ public class FaceShieldService {
             );
         }
 
-        // 4. 파일 크기 검증
+        // 파일 크기 검증
         if (request.fileSize() <= 0
                 || request.fileSize() > maxFileSize) {
             throw new GlobalException(
@@ -175,7 +181,6 @@ public class FaceShieldService {
             );
         }
 
-        // 5. 기존 미완료 업로드 티켓 확인
         FaceShieldUploadTicket ticket =
                 ticketRepository
                         .findFirstByJob_IdAndLeaseTokenAndCompletedFalseOrderByIdDesc(
@@ -186,7 +191,6 @@ public class FaceShieldService {
 
         if (ticket == null) {
 
-            // 6. Spring에서 보호 이미지 Object Key 생성
             String objectKey = String.format(
                     "images/faceshield/%d/%s.png",
                     job.getFirstProcessedImage()
@@ -195,7 +199,6 @@ public class FaceShieldService {
                     UUID.randomUUID()
             );
 
-            // 7. 업로드 티켓 저장
             ticket = ticketRepository.save(
                     FaceShieldUploadTicket.of(
                             job,
@@ -214,7 +217,6 @@ public class FaceShieldService {
             );
         }
 
-        // 8. Presigned PUT URL 발급
         String uploadUrl =
                 s3StorageService.createPresignedPutUrl(
                         ticket.getObjectKey(),
@@ -236,27 +238,24 @@ public class FaceShieldService {
             FaceShieldCompleteRequest request
     ) {
 
-        // 1. 작업 조회 및 비관적 락
+        // 작업 조회 및 비관적 락
         FaceShieldJob job =
                 findJobForUpdate(request.jobId());
 
-        // 2. Lease Token 일치 여부 확인
         requireMatchingLease(
                 job,
                 request.leaseToken()
         );
 
-        // 3. Object Key에 해당하는 티켓 조회
+        // 업로드 티켓 조회
         FaceShieldUploadTicket ticket =
-                ticketRepository
-                        .findByObjectKey(
-                                request.objectKey()
-                        )
-                        .orElseThrow(() -> new GlobalException(
-                                ImageErrorCode.IMAGE_NOT_FOUND
-                        ));
+                ticketRepository.findByObjectKey(
+                        request.objectKey()
+                ).orElseThrow(() -> new GlobalException(
+                        ImageErrorCode.IMAGE_NOT_FOUND
+                ));
 
-        // 4. 티켓과 작업의 관계 검증
+        // 작업과 업로드 티켓 검증
         if (!Objects.equals(
                 ticket.getJob().getId(),
                 job.getId()
@@ -269,7 +268,7 @@ public class FaceShieldService {
             );
         }
 
-        // 5. 동일 완료 요청 재전송 시 성공 반환
+        // 중복 완료 요청 방지
         if (ticket.isCompleted()
                 && job.getStatus()
                 == FaceShieldJobStatus.COMPLETED) {
@@ -282,13 +281,12 @@ public class FaceShieldService {
             );
         }
 
-        // 6. 유효한 작업 할당인지 검증
         requireActiveLease(
                 job,
                 request.leaseToken()
         );
 
-        // 7. 원본 이미지 비관적 락 획득
+        // 원본 이미지 조회 및 비관적 락
         SourceImage sourceImage =
                 sourceImageRepository.findByIdForUpdate(
                         job.getFirstProcessedImage()
@@ -298,14 +296,13 @@ public class FaceShieldService {
                         ImageErrorCode.IMAGE_NOT_FOUND
                 ));
 
-        if (sourceImage.getStatus()
-                != ImageStatus.PROCEED) {
+        if (sourceImage.getStatus() != ImageStatus.PROCEED) {
             throw new GlobalException(
                     ImageErrorCode.INVALID_IMAGE_STATUS
             );
         }
 
-        // 8. S3 객체 메타데이터 확인
+        // S3 실제 업로드 여부 검증
         HeadObjectResponse metadata =
                 s3StorageService.getObjectMetadata(
                         ticket.getObjectKey()
@@ -329,7 +326,7 @@ public class FaceShieldService {
             );
         }
 
-        // 9. FaceShield AI 모델 조회
+        // FaceShield 모델 조회
         AiModel model =
                 aiModelRepository
                         .findFirstByModelNameOrderByIdAsc(
@@ -339,7 +336,7 @@ public class FaceShieldService {
                                 ImageErrorCode.FACESHIELD_MODEL_NOT_FOUND
                         ));
 
-        // 10. 최종 보호 이미지 저장
+        // 최종 보호 이미지 저장
         SecondProcessedImage secondImage =
                 SecondProcessedImage.of(
                         job.getFirstProcessedImage(),
@@ -350,26 +347,41 @@ public class FaceShieldService {
 
         secondImageRepository.save(secondImage);
 
-        // 11. 업로드 티켓 완료
+        // 업로드 티켓 완료
         ticket.markCompleted();
 
-        // 12. FaceShield 작업 완료
+        // 작업 상태 변경
         job.complete();
 
-        // 13. 원본 이미지 최종 처리 완료
+        // 최종 이미지 처리 완료
         sourceImage.complete();
 
+        // 사용자 알림 DB 저장
+        Notification notification = Notification.of(
+                sourceImage.getUser(),
+                "이미지 보호 처리가 완료되었습니다.",
+                NotificationType.IMAGE_PROTECTION_COMPLETED
+        );
+
+        notificationRepository.save(notification);
+
+        // DB 커밋 완료 후 FCM 발송 이벤트 실행
+        eventPublisher.publishEvent(
+                new FaceShieldCompletedEvent(
+                        sourceImage.getUser().getId(),
+                        sourceImage.getId()
+                )
+        );
+
         log.info(
-                "FaceShield completed. jobId={}, sourceImageId={}",
+                "FaceShield completed. jobId={} sourceImageId={}",
                 job.getId(),
                 sourceImage.getId()
         );
-
-        // 실제 FCM 발송은 후속 단계에서 연결
     }
 
     /**
-     * GPU Worker가 실패를 보고한 경우
+     * GPU Worker 실패 보고
      */
     @Transactional
     public void fail(
@@ -385,22 +397,24 @@ public class FaceShieldService {
         );
 
         log.warn(
-                "FaceShield failed. jobId={}, attempt={}/{}, reason={}",
+                "FaceShield failed. jobId={} attempt={}/{} reason={}",
                 job.getId(),
                 job.getAttemptCount(),
                 maxAttempts,
                 request.reason()
         );
 
-        // 최대 재시도 횟수 초과
         if (job.getAttemptCount() >= maxAttempts) {
             finishAsFailed(job);
+
         } else {
-            // 재시도 가능하면 대기 상태로 복귀
             job.requeue();
         }
     }
 
+    /**
+     * 작업 조회 및 비관적 락
+     */
     private FaceShieldJob findJobForUpdate(
             Long jobId
     ) {
@@ -411,6 +425,9 @@ public class FaceShieldService {
                 ));
     }
 
+    /**
+     * Lease Token 일치 여부 검증
+     */
     private void requireMatchingLease(
             FaceShieldJob job,
             String leaseToken
@@ -422,10 +439,14 @@ public class FaceShieldService {
         }
     }
 
+    /**
+     * Lease Token 및 만료 시간 검증
+     */
     private void requireActiveLease(
             FaceShieldJob job,
             String leaseToken
     ) {
+
         requireMatchingLease(
                 job,
                 leaseToken
@@ -439,7 +460,7 @@ public class FaceShieldService {
     }
 
     /**
-     * 작업 및 원본 이미지 실패 처리
+     * 최종 실패 상태 처리
      */
     private void finishAsFailed(
             FaceShieldJob job
@@ -463,11 +484,12 @@ public class FaceShieldService {
                 != ImageStatus.COMPLETED
                 && sourceImage.getStatus()
                 != ImageStatus.FAILED) {
+
             sourceImage.fail();
         }
 
         log.warn(
-                "FaceShield permanently failed. jobId={}, sourceImageId={}",
+                "FaceShield permanently failed. jobId={} sourceImageId={}",
                 job.getId(),
                 sourceImageId
         );
