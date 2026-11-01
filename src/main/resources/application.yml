@@ -96,6 +96,12 @@ app:
     api-key: ${BLUR_API_KEY}
     internal-api-key: ${INTERNAL_API_KEY}
 
+  faceshield:
+    internal-api-key: ${FACESHIELD_INTERNAL_API_KEY}
+    lease-seconds: ${FACESHIELD_LEASE_SECONDS:1800}
+    max-attempts: ${FACESHIELD_MAX_ATTEMPTS:3}
+    model-name: FaceShield
+
 
   client-base-url: ${CLIENT_BASE_URL}
 
