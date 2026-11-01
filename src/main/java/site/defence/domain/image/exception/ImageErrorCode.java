@@ -49,6 +49,24 @@ public enum ImageErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             3006,
             "현재 이미지 상태에서는 요청을 처리할 수 없습니다."
+    ),
+
+    FACESHIELD_JOB_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            3007,
+            "FaceShield 작업을 찾을 수 없습니다."
+    ),
+
+    FACESHIELD_LEASE_INVALID(
+            HttpStatus.CONFLICT,
+            3008,
+            "FaceShield 작업 할당이 만료되었거나 유효하지 않습니다."
+    ),
+
+    FACESHIELD_MODEL_NOT_FOUND(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            3009,
+            "FaceShield AI 모델 정보가 등록되지 않았습니다."
     );
 
     private final HttpStatus status;
