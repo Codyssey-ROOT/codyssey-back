@@ -1,6 +1,8 @@
 
 services:
   app:
+    environment:
+      FACESHIELD_INTERNAL_API_KEY: ${FACESHIELD_INTERNAL_API_KEY}
     image: ${DOCKERHUB_USERNAME:?required}/deepfence:${IMAGE_TAG:?required}
     container_name: deepfence-app
     restart: unless-stopped
