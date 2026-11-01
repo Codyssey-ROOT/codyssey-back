@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -11,6 +12,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
 import site.defence.global.security.cookie.CookieProvider;
 import site.defence.global.security.filter.InternalBlurApiKeyFilter;
 import site.defence.global.security.filter.JwtAuthenticationFilter;
@@ -35,7 +37,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            @Value("${app.blur.internal-api-key}") String internalApiKey
+
+            @Value("${app.blur.internal-api-key}")
+            String blurInternalApiKey,
+
+            @Value("${app.faceshield.internal-api-key}")
+            String faceShieldInternalApiKey
     ) throws Exception {
 
         return http
@@ -63,9 +70,15 @@ public class SecurityConfig {
                                         "/actuator/health",
                                         "/actuator/prometheus",
 
-                                        // FastAPI 내부 전용 API
+                                        // Blur FastAPI 내부 API
                                         "/blur/images/presigned-url",
-                                        "/blur/images/complete"
+                                        "/blur/images/complete",
+
+                                        // FaceShield GPU Worker 내부 API
+                                        "/faceshield/jobs/claim",
+                                        "/faceshield/jobs/fail",
+                                        "/faceshield/images/presigned-url",
+                                        "/faceshield/images/complete"
                                 )
                                 .permitAll()
 
@@ -105,7 +118,8 @@ public class SecurityConfig {
 
                 .addFilterBefore(
                         new InternalBlurApiKeyFilter(
-                                internalApiKey
+                                blurInternalApiKey,
+                                faceShieldInternalApiKey
                         ),
                         JwtAuthenticationFilter.class
                 )

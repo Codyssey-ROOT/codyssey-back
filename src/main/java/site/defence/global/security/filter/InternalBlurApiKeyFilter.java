@@ -4,6 +4,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -16,20 +17,26 @@ public class InternalBlurApiKeyFilter
     private static final String HEADER_NAME =
             "X-Internal-API-Key";
 
-    private final byte[] expected;
+    private final byte[] blurExpected;
+    private final byte[] faceShieldExpected;
 
     public InternalBlurApiKeyFilter(
-            String expectedKey
+            String blurKey,
+            String faceShieldKey
     ) {
-        if (expectedKey == null || expectedKey.isBlank()) {
+        if (blurKey == null || blurKey.isBlank()
+                || faceShieldKey == null
+                || faceShieldKey.isBlank()) {
             throw new IllegalArgumentException(
-                    "INTERNAL_API_KEY must not be blank"
+                    "Internal API keys must not be blank"
             );
         }
 
-        this.expected = expectedKey.getBytes(
-                StandardCharsets.UTF_8
-        );
+        this.blurExpected =
+                blurKey.getBytes(StandardCharsets.UTF_8);
+
+        this.faceShieldExpected =
+                faceShieldKey.getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
@@ -38,8 +45,8 @@ public class InternalBlurApiKeyFilter
     ) {
         String path = request.getServletPath();
 
-        return !path.equals("/blur/images")
-                && !path.startsWith("/blur/images/");
+        return !path.startsWith("/blur/images/")
+                && !path.startsWith("/faceshield/");
     }
 
     @Override
@@ -49,19 +56,29 @@ public class InternalBlurApiKeyFilter
             FilterChain filterChain
     ) throws ServletException, IOException {
 
+        String path = request.getServletPath();
+
+        // API 경로에 따라 서로 다른 키 사용
+        byte[] expected =
+                path.startsWith("/faceshield/")
+                        ? faceShieldExpected
+                        : blurExpected;
+
         String provided = request.getHeader(
                 HEADER_NAME
         );
 
-        boolean valid = provided != null
-                && MessageDigest.isEqual(
-                expected,
-                provided.getBytes(
-                        StandardCharsets.UTF_8
-                )
-        );
+        boolean valid =
+                provided != null
+                        && MessageDigest.isEqual(
+                        expected,
+                        provided.getBytes(
+                                StandardCharsets.UTF_8
+                        )
+                );
 
         if (!valid) {
+
             response.setStatus(
                     HttpServletResponse.SC_UNAUTHORIZED
             );
